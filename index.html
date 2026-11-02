@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>鮮魚のご予約｜洋食だいにんぐなかむら</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F2F5F6; --surface:#FFFFFF; --ink:#1E2528; --sub:#5B676C;
+  --ai:#23446A; --ice:#DCE7EB; --rule:#C7D3D8; --red:#9C2B24; --ok:#2E6A4E;
+  --mincho:"Shippori Mincho","Hiragino Mincho ProN","Yu Mincho",serif;
+  --sans:"Hiragino Sans","Noto Sans JP","Yu Gothic",system-ui,sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root{ --bg:#12191D; --surface:#1A2328; --ink:#E6ECEE; --sub:#9AA9AF;
+    --ai:#8FB4DB; --ice:#22313A; --rule:#33444C; --red:#E07A70; --ok:#7CC4A0; color-scheme:dark; }
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.7;
+  padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+.wrap{max-width:560px;margin:0 auto;padding:28px 18px 64px}
+header .shop{margin:0;color:var(--sub);font-size:14px}
+header h1{font-family:var(--mincho);font-weight:700;font-size:34px;line-height:1.3;margin:2px 0 10px;color:var(--ai)}
+header p.lead{margin:0 0 6px;font-size:15px}
+.rules{margin:14px 0 24px;padding:12px 14px;background:var(--ice);border-radius:6px;font-size:14px}
+.rules p{margin:0}
+.rules p+p{margin-top:4px}
+
+.list{border-top:2px solid var(--ai)}
+.fish{border-bottom:1px solid var(--rule);padding:18px 2px}
+.fish-top{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.fish h2{font-family:var(--mincho);font-weight:700;font-size:30px;line-height:1.2;margin:0}
+.price{white-space:nowrap;font-size:15px}
+.price b{font-size:22px;font-weight:700}
+.meta{margin:6px 0 0;color:var(--sub);font-size:14px}
+.meta span{display:block}
+.remain{font-weight:700;color:var(--ok)}
+.remain.few{color:var(--red)}
+.soldout .fish-top,.soldout .meta{opacity:.5}
+.tag-sold{display:inline-block;margin-top:8px;color:var(--red);font-weight:700}
+.memo{margin:6px 0 0;font-size:14px}
+
+button{font:inherit;cursor:pointer}
+.btn{display:block;width:100%;margin-top:12px;padding:13px 16px;border:0;border-radius:8px;
+  background:var(--ai);color:var(--surface);font-weight:700;font-size:16px}
+.btn.ghost{background:transparent;color:var(--ai);border:1.5px solid var(--ai)}
+.btn:disabled{opacity:.5;cursor:default}
+.btn:focus-visible,input:focus-visible,textarea:focus-visible,.choice input:focus-visible+span,.qty button:focus-visible{outline:3px solid var(--ai);outline-offset:2px}
+
+.order{margin-top:14px;padding:16px 14px;background:var(--surface);border-radius:8px;border:1px solid var(--rule)}
+.field{margin-top:14px}
+.field:first-child{margin-top:0}
+.field label,.field .lbl{display:block;font-size:14px;font-weight:700;margin-bottom:6px}
+input[type=text],input[type=tel],textarea{width:100%;padding:11px 12px;font:inherit;font-size:16px;color:var(--ink);
+  background:var(--bg);border:1px solid var(--rule);border-radius:6px}
+textarea{min-height:64px;resize:vertical}
+.qty{display:flex;align-items:center;gap:14px}
+.qty button{width:44px;height:44px;border-radius:50%;border:1.5px solid var(--ai);background:transparent;color:var(--ai);font-size:22px;line-height:1}
+.qty output{min-width:3em;text-align:center;font-size:20px;font-weight:700}
+.choices{display:grid;gap:8px}
+.choice{display:block;position:relative}
+.choice input{position:absolute;opacity:0}
+.choice span{display:block;padding:11px 12px;border:1px solid var(--rule);border-radius:6px;background:var(--bg)}
+.choice input:checked+span{border-color:var(--ai);box-shadow:inset 0 0 0 1px var(--ai)}
+.choice small{color:var(--sub)}
+.est{margin-top:16px;padding-top:12px;border-top:1px dashed var(--rule)}
+.est .num{font-size:24px;font-weight:700}
+.est p{margin:2px 0 0;font-size:13px;color:var(--sub)}
+.err{margin-top:10px;color:var(--red);font-weight:700;font-size:15px}
+
+.done{text-align:left}
+.done .no-label{margin:24px 0 0;font-size:14px;color:var(--sub)}
+.done .no{font-family:var(--mincho);font-size:44px;font-weight:700;color:var(--ai);margin:0;line-height:1.2}
+.done dl{margin:18px 0 0;display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:15px}
+.done dt{color:var(--sub)}
+.done dd{margin:0}
+.note-box{margin-top:18px;padding:12px 14px;background:var(--ice);border-radius:6px;font-size:14px}
+.empty{padding:28px 2px;color:var(--sub)}
+.loading{padding:28px 2px;color:var(--sub)}
+@media (prefers-reduced-motion:no-preference){
+  .order{animation:open .18s ease-out}
+  @keyframes open{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <p class="shop">洋食だいにんぐなかむら</p>
+    <h1>鮮魚のご予約</h1>
+    <p class="lead">入荷した魚を、ご予約いただいた分だけお渡しします。</p>
+  </header>
+  <div class="rules">
+    <p>金額は目安です。お渡しのときに重さを量って確定します。</p>
+    <p>先着順です。売り切れの場合はこの画面でお知らせします。</p>
+    <p>下ろしたあとのキャンセルはご遠慮ください。</p>
+  </div>
+  <main id="app"><p class="loading">読み込んでいます…</p></main>
+</div>
+
+<script>
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbzcHZEYfE2ecfNmdoAUmKK5Xb-2Duiewu6D5W3a8fvZLexR3gG2hzOQCxWaEK01eN1V/exec';
+
+const app = document.getElementById('app');
+let items = [];
+let openId = null;
+const yen = n => Number(n || 0).toLocaleString('ja-JP');
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const WD = ['日','月','火','水','木','金','土'];
+function fmtDate(s){ if(!s) return ''; const d = new Date(s.slice(0,10)+'T00:00'); if(isNaN(d)) return s; return `${d.getMonth()+1}月${d.getDate()}日(${WD[d.getDay()]})`; }
+function fmtDT(s){ if(!s) return ''; return fmtDate(s) + ' ' + s.slice(11,16); }
+function oneEst(it){ return Math.round(it.weight / 100 * it.price); }
+
+async function api(action, data){
+  const url = GAS_URL + '?action=' + action + '&data=' + encodeURIComponent(JSON.stringify(data || {})) + '&t=' + Date.now();
+  const r = await fetch(url);
+  return r.json();
+}
+
+function saved(k){ try { return localStorage.getItem('sengyo_' + k) || ''; } catch(e){ return ''; } }
+function save(k, v){ try { localStorage.setItem('sengyo_' + k, v); } catch(e){} }
+
+async function load(){
+  app.innerHTML = '<p class="loading">読み込んでいます…</p>';
+  try {
+    const res = await api('list');
+    if(!res.ok) throw new Error(res.error);
+    items = res.items;
+    renderList();
+  } catch(e){
+    app.innerHTML = '<p class="empty">読み込めませんでした。電波の良い場所で、もう一度開いてください。</p>';
+  }
+}
+
+function renderList(){
+  if(!items.length){
+    app.innerHTML = '<p class="empty">いま受付中の魚はありません。入荷したらLINEでお知らせします。</p>';
+    return;
+  }
+  app.innerHTML = '<div class="list">' + items.map(it => {
+    const sold = it.remain <= 0;
+    const few = it.remain > 0 && it.remain <= 2;
+    return `<article class="fish${sold ? ' soldout' : ''}" id="f-${esc(it.id)}">
+      <div class="fish-top">
+        <h2>${esc(it.name)}</h2>
+        <div class="price">100g <b>${yen(it.price)}</b>円<small>（税込）</small></div>
+      </div>
+      <p class="meta">
+        ${it.weight ? `<span>1尾 約${yen(it.weight)}g・目安 税込${yen(oneEst(it))}円</span>` : ''}
+        <span>受け取り ${fmtDate(it.pickupDate)} ${esc(it.pickupTime)}</span>
+        <span>締切 ${fmtDT(it.deadline)}</span>
+        ${it.origin ? `<span>産地 ${esc(it.origin)}</span>` : ''}
+        ${sold ? '' : `<span class="remain${few ? ' few' : ''}">残り${it.remain}尾</span>`}
+      </p>
+      ${it.memo ? `<p class="memo">${esc(it.memo)}</p>` : ''}
+      ${sold ? '<span class="tag-sold">売り切れ</span>'
+        : (openId === it.id ? orderForm(it) : `<button class="btn ghost" onclick="openOrder('${esc(it.id)}')">この魚を注文する</button>`)}
+    </article>`;
+  }).join('') + '</div>';
+  if(openId) bindForm();
+}
+
+function openOrder(id){ openId = id; renderList(); document.getElementById('f-' + id).scrollIntoView({behavior:'smooth', block:'start'}); }
+
+function orderForm(it){
+  const max = Math.max(1, Math.min(it.remain, it.limit));
+  return `<form class="order" id="orderForm" novalidate>
+    <div class="field">
+      <span class="lbl">数${it.limit < 99 ? `（お一人様${it.limit}尾まで）` : ''}</span>
+      <div class="qty">
+        <button type="button" aria-label="1尾減らす" data-d="-1">−</button>
+        <output id="qty" data-max="${max}">1</output>
+        <button type="button" aria-label="1尾増やす" data-d="1">＋</button>
+      </div>
+    </div>
+    <div class="field">
+      <span class="lbl">お渡しの形</span>
+      <div class="choices">
+        <label class="choice"><input type="radio" name="style" value="丸のまま" checked><span>丸のまま</span></label>
+        <label class="choice"><input type="radio" name="style" value="三枚おろし"><span>三枚おろし（アラ付き）<small>　＋税込${yen(it.fee)}円／尾</small></span></label>
+      </div>
+    </div>
+    <div class="field">
+      <label for="name">お名前</label>
+      <input type="text" id="name" autocomplete="name" value="${esc(saved('name'))}">
+    </div>
+    <div class="field">
+      <label for="tel">電話番号</label>
+      <input type="tel" id="tel" inputmode="tel" autocomplete="tel" placeholder="09012345678" value="${esc(saved('tel'))}">
+    </div>
+    <div class="field">
+      <label for="note">ご要望（任意）</label>
+      <textarea id="note" placeholder="例：切り身にしてほしい、受け取りが少し遅れる など"></textarea>
+    </div>
+    <div class="est">
+      <span>目安金額</span><br>
+      <span class="num" id="est"></span>
+      <p>お渡しのときに重さを量って確定します。</p>
+    </div>
+    <p class="err" id="err" role="alert"></p>
+    <button class="btn" type="submit" id="send">注文を確定する</button>
+    <button class="btn ghost" type="button" onclick="openId=null;renderList()">やめる</button>
+  </form>`;
+}
+
+function bindForm(){
+  const it = items.find(x => x.id === openId);
+  const f = document.getElementById('orderForm');
+  const q = document.getElementById('qty');
+  const update = () => {
+    const n = Number(q.value);
+    const style = f.querySelector('input[name=style]:checked').value;
+    const sum = (oneEst(it) + (style === '三枚おろし' ? it.fee : 0)) * n;
+    document.getElementById('est').textContent = it.weight ? `税込 ${yen(sum)}円` : '受け取り時に確定';
+  };
+  f.querySelectorAll('.qty button').forEach(b => b.onclick = () => {
+    const n = Math.min(Number(q.dataset.max), Math.max(1, Number(q.value) + Number(b.dataset.d)));
+    q.value = n; q.textContent = n; update();
+  });
+  f.querySelectorAll('input[name=style]').forEach(r => r.onchange = update);
+  q.value = 1; update();
+  f.onsubmit = async ev => {
+    ev.preventDefault();
+    const err = document.getElementById('err');
+    const send = document.getElementById('send');
+    const data = {
+      id: it.id, qty: Number(q.value),
+      style: f.querySelector('input[name=style]:checked').value,
+      name: document.getElementById('name').value.trim(),
+      tel: document.getElementById('tel').value.replace(/[^\d]/g, ''),
+      note: document.getElementById('note').value.trim()
+    };
+    if(!data.name){ err.textContent = 'お名前を入れてください'; return; }
+    if(data.tel.length < 10 || data.tel.length > 11){ err.textContent = '電話番号を確認してください（ハイフンなしで10〜11桁）'; return; }
+    err.textContent = ''; send.disabled = true; send.textContent = '送信しています…';
+    try {
+      const res = await api('order', data);
+      if(res.ok){
+        save('name', data.name); save('tel', data.tel);
+        showDone(res);
+      } else {
+        err.textContent = res.error || '注文できませんでした';
+        send.disabled = false; send.textContent = '注文を確定する';
+        if(res.code === 'soldout' || res.code === 'closed'){ setTimeout(load, 1800); openId = null; }
+      }
+    } catch(e){
+      err.textContent = '送信できませんでした。電波の良い場所でもう一度押してください。';
+      send.disabled = false; send.textContent = '注文を確定する';
+    }
+  };
+}
+
+function showDone(r){
+  openId = null;
+  app.innerHTML = `<section class="done">
+    <p class="no-label">ご注文を受け付けました。受付番号</p>
+    <p class="no">${esc(r.no)}</p>
+    <dl>
+      <dt>魚</dt><dd>${esc(r.name)} ×${r.qty}尾</dd>
+      <dt>お渡し</dt><dd>${esc(r.style)}</dd>
+      <dt>受け取り</dt><dd>${fmtDate(r.pickupDate)} ${esc(r.pickupTime)}</dd>
+      <dt>目安金額</dt><dd>税込 ${yen(r.estimate)}円</dd>
+    </dl>
+    <div class="note-box">この画面をスクリーンショットで保存してください。受け取りのときに受付番号をお伝えください。お支払いはお渡しのときです。</div>
+    <button class="btn ghost" onclick="load()">ほかの魚も見る</button>
+  </section>`;
+  window.scrollTo({top:0});
+}
+
+load();
+</script>
+</body>
+</html>

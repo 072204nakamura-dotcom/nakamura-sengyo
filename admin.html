@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>鮮魚 管理</title>
+<style>
+:root{
+  --bg:#F2F5F6; --surface:#FFFFFF; --ink:#1E2528; --sub:#5B676C;
+  --ai:#23446A; --ice:#DCE7EB; --rule:#C7D3D8; --red:#9C2B24; --ok:#2E6A4E;
+  --sans:"Hiragino Sans","Noto Sans JP","Yu Gothic",system-ui,sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root{ --bg:#12191D; --surface:#1A2328; --ink:#E6ECEE; --sub:#9AA9AF;
+    --ai:#8FB4DB; --ice:#22313A; --rule:#33444C; --red:#E07A70; --ok:#7CC4A0; color-scheme:dark; }
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.6;
+  padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+.wrap{max-width:600px;margin:0 auto;padding:18px 16px 60px}
+h1{font-size:22px;margin:0 0 12px;color:var(--ai)}
+h2{font-size:18px;margin:28px 0 10px;padding-bottom:6px;border-bottom:2px solid var(--ai)}
+.tabs{display:flex;gap:8px;position:sticky;top:0;background:var(--bg);padding:8px 0;z-index:5}
+.tabs button{flex:1;padding:10px 6px;border:1.5px solid var(--ai);background:transparent;color:var(--ai);border-radius:8px;font:inherit;font-weight:700}
+.tabs button[aria-pressed=true]{background:var(--ai);color:var(--surface)}
+.panel[hidden]{display:none}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.field{margin-top:12px}
+.field label{display:block;font-size:14px;font-weight:700;margin-bottom:4px}
+.field small{color:var(--sub);font-weight:400}
+input,textarea{width:100%;padding:10px 11px;font:inherit;font-size:16px;color:var(--ink);background:var(--surface);border:1px solid var(--rule);border-radius:6px}
+textarea{min-height:60px}
+button{font:inherit;cursor:pointer}
+.btn{display:block;width:100%;margin-top:16px;padding:13px;border:0;border-radius:8px;background:var(--ai);color:var(--surface);font-weight:700}
+.btn.ghost{background:transparent;color:var(--ai);border:1.5px solid var(--ai)}
+.btn:disabled{opacity:.5}
+.small{display:inline-block;padding:7px 12px;border-radius:6px;border:1.5px solid var(--ai);background:transparent;color:var(--ai);font-weight:700;font-size:14px}
+.small.solid{background:var(--ai);color:var(--surface)}
+.small.warn{border-color:var(--red);color:var(--red)}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid var(--ai);outline-offset:2px}
+.row{padding:12px 0;border-bottom:1px solid var(--rule)}
+.row .t{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.row .t b{font-size:18px}
+.row .m{color:var(--sub);font-size:14px}
+.row .acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.badge{font-size:13px;font-weight:700;padding:2px 8px;border-radius:99px;background:var(--ice);color:var(--ai);white-space:nowrap}
+.badge.done{color:var(--ok)}
+.badge.off{color:var(--sub)}
+.msg{margin:10px 0 0;font-weight:700}
+.msg.err{color:var(--red)}
+.msg.ok{color:var(--ok)}
+.empty{color:var(--sub);padding:12px 0}
+details{margin-top:10px}
+summary{cursor:pointer;color:var(--ai);font-weight:700;padding:8px 0}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s}
+.toast.show{opacity:1}
+.foot{margin-top:36px;color:var(--sub);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbzcHZEYfE2ecfNmdoAUmKK5Xb-2Duiewu6D5W3a8fvZLexR3gG2hzOQCxWaEK01eN1V/exec';
+const FORM_URL = location.href.replace(/admin\.html.*$/, '');
+
+const app = document.getElementById('app');
+let pass = '';
+let data = { items: [], orders: [] };
+let tab = 'orders';
+const yen = n => Number(n || 0).toLocaleString('ja-JP');
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const WD = ['日','月','火','水','木','金','土'];
+function fmtDate(s){ if(!s) return ''; const d = new Date(s.slice(0,10)+'T00:00'); if(isNaN(d)) return s; return `${d.getMonth()+1}/${d.getDate()}(${WD[d.getDay()]})`; }
+function fmtDT(s){ return s ? fmtDate(s) + ' ' + s.slice(11,16) : ''; }
+function today(){ const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function toast(t){ const el = document.getElementById('toast'); el.textContent = t; el.classList.add('show'); setTimeout(() => el.classList.remove('show'), 2200); }
+
+async function api(action, d){
+  const url = GAS_URL + '?action=' + action + '&data=' + encodeURIComponent(JSON.stringify(d || {})) + '&t=' + Date.now();
+  const r = await fetch(url);
+  return r.json();
+}
+async function adm(op, extra){ return api('admin', Object.assign({ pass, op }, extra || {})); }
+
+/* ---------- ログイン ---------- */
+function loginView(msg){
+  app.innerHTML = `<h1>鮮魚 管理</h1>
+    <div class="field"><label for="pw">管理パスワード</label><input type="password" id="pw" autocomplete="current-password"></div>
+    <p class="msg err">${esc(msg || '')}</p>
+    <button class="btn" id="go">開く</button>`;
+  const go = async () => {
+    pass = document.getElementById('pw').value;
+    const ok = await refresh(true);
+    if(ok){ try { localStorage.setItem('sengyo_admin_pass', pass); } catch(e){} }
+  };
+  document.getElementById('go').onclick = go;
+  document.getElementById('pw').onkeydown = e => { if(e.key === 'Enter') go(); };
+}
+
+async function refresh(fromLogin){
+  try {
+    const res = await adm('list');
+    if(!res.ok){
+      if(res.code === 'auth'){ try { localStorage.removeItem('sengyo_admin_pass'); } catch(e){} loginView(fromLogin ? 'パスワードが違います' : ''); return false; }
+      throw new Error(res.error);
+    }
+    data = res; render(); return true;
+  } catch(e){
+    app.innerHTML = `<h1>鮮魚 管理</h1><p class="msg err">読み込めませんでした：${esc(e.message)}</p><button class="btn ghost" onclick="refresh()">もう一度</button>`;
+    return false;
+  }
+}
+
+/* ---------- 画面 ---------- */
+function render(){
+  app.innerHTML = `<h1>鮮魚 管理</h1>
+    <div class="tabs">
+      <button aria-pressed="${tab==='orders'}" onclick="tab='orders';render()">注文</button>
+      <button aria-pressed="${tab==='items'}" onclick="tab='items';render()">入荷</button>
+      <button aria-pressed="${tab==='add'}" onclick="tab='add';render()">入荷を登録</button>
+    </div>
+    <section class="panel" ${tab==='orders'?'':'hidden'}>${ordersView()}</section>
+    <section class="panel" ${tab==='items'?'':'hidden'}>${itemsView()}</section>
+    <section class="panel" ${tab==='add'?'':'hidden'}>${addView()}</section>
+    <button class="btn ghost" onclick="refresh()">最新にする</button>
+    <p class="foot">注文フォーム：${esc(FORM_URL)}<br>
+      <button class="small" onclick="testLine()">LINE通知のテスト</button>
+      <button class="small" onclick="logout()">ログアウト</button></p>`;
+  if(tab === 'add') bindAdd();
+}
+
+function ordersView(){
+  const wait = data.orders.filter(o => o.state === '受付');
+  const rest = data.orders.filter(o => o.state !== '受付');
+  const row = o => `<div class="row">
+      <div class="t"><b>${esc(o.name)} ×${o.qty}</b><span class="badge ${o.state==='受け取り済み'?'done':o.state==='取消'?'off':''}">${esc(o.state)}</span></div>
+      <div class="m">${esc(o.no)}　${esc(o.style)}　目安 税込${yen(o.estimate)}円</div>
+      <div class="m">${esc(o.customer)} さん　<a href="tel:${esc(o.tel)}">${esc(o.tel)}</a></div>
+      <div class="m">受け取り ${fmtDate(o.pickupDate)} ${esc(o.pickupTime)}</div>
+      ${o.note ? `<div class="m">ご要望：${esc(o.note)}</div>` : ''}
+      ${o.state === '受付' ? `<div class="acts">
+        <button class="small solid" onclick="setState('${esc(o.no)}','受け取り済み')">受け取り済み</button>
+        <button class="small warn" onclick="setState('${esc(o.no)}','取消')">取消</button></div>` : ''}
+    </div>`;
+  return `<h2>受け取り待ち（${wait.length}件）</h2>
+    ${wait.length ? wait.map(row).join('') : '<p class="empty">受け取り待ちの注文はありません。</p>'}
+    ${rest.length ? `<details><summary>受け取り済み・取消（${rest.length}件）</summary>${rest.map(row).join('')}</details>` : ''}`;
+}
+
+function itemsView(){
+  if(!data.items.length) return '<p class="empty">まだ入荷の登録がありません。「入荷を登録」から始めてください。</p>';
+  return '<h2>入荷した魚</h2>' + data.items.map(it => {
+    const open = it.state === '受付中' && !it.expired;
+    const st = open ? (it.remain > 0 ? '受付中' : '売り切れ') : '締切';
+    return `<div class="row">
+      <div class="t"><b>${esc(it.name)}</b><span class="badge ${open?'':'off'}">${st}</span></div>
+      <div class="m">100g 税込${yen(it.price)}円　1尾 約${yen(it.weight)}g　残り ${it.remain}／${it.total}尾</div>
+      <div class="m">受け取り ${fmtDate(it.pickupDate)} ${esc(it.pickupTime)}　締切 ${fmtDT(it.deadline)}</div>
+      ${it.origin ? `<div class="m">産地 ${esc(it.origin)}</div>` : ''}
+      <div class="acts">
+        ${open ? `<button class="small solid" onclick="copyAnnounce('${esc(it.id)}')">LINE案内文をコピー</button>
+        <button class="small warn" onclick="closeItem('${esc(it.id)}')">受付を締め切る</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function addView(){
+  return `<h2>入荷を登録</h2>
+    <form id="addForm" novalidate>
+      <div class="field"><label for="a-name">魚の名前</label><input id="a-name" placeholder="例：真鯛"></div>
+      <div class="grid">
+        <div class="field"><label for="a-price">100gの値段 <small>税込</small></label><input id="a-price" type="number" inputmode="numeric" placeholder="150"></div>
+        <div class="field"><label for="a-weight">1尾の目安 <small>g</small></label><input id="a-weight" type="number" inputmode="numeric" placeholder="1500"></div>
+        <div class="field"><label for="a-total">入荷数 <small>尾</small></label><input id="a-total" type="number" inputmode="numeric" placeholder="3"></div>
+        <div class="field"><label for="a-limit">1人の上限 <small>尾</small></label><input id="a-limit" type="number" inputmode="numeric" value="1"></div>
+      </div>
+      <div class="field"><label for="a-fee">三枚おろしの手間賃 <small>税込・1尾</small></label><input id="a-fee" type="number" inputmode="numeric" value="500"></div>
+      <div class="grid">
+        <div class="field"><label for="a-pdate">受け取り日</label><input id="a-pdate" type="date" value="${today()}"></div>
+        <div class="field"><label for="a-ptime">受け取り時間</label><input id="a-ptime" value="17:00〜18:00"></div>
+      </div>
+      <div class="field"><label for="a-deadline">注文の締切</label><input id="a-deadline" type="datetime-local" value="${today()}T15:00"></div>
+      <div class="field"><label for="a-origin">産地 <small>その日に確認できたときだけ</small></label><input id="a-origin" placeholder="空欄のままでOK"></div>
+      <div class="field"><label for="a-memo">ひとこと <small>任意</small></label><textarea id="a-memo" placeholder="例：刺身でも煮付けでもおいしいサイズです"></textarea></div>
+      <p class="msg" id="a-msg" role="alert"></p>
+      <button class="btn" type="submit" id="a-send">登録して受付を始める</button>
+    </form>`;
+}
+
+function bindAdd(){
+  const f = document.getElementById('addForm');
+  f.onsubmit = async ev => {
+    ev.preventDefault();
+    const v = id => document.getElementById(id).value.trim();
+    const item = { name: v('a-name'), price: v('a-price'), weight: v('a-weight'), total: v('a-total'), limit: v('a-limit'),
+      fee: v('a-fee'), pickupDate: v('a-pdate'), pickupTime: v('a-ptime'), deadline: v('a-deadline'), origin: v('a-origin'), memo: v('a-memo') };
+    const msg = document.getElementById('a-msg'); const btn = document.getElementById('a-send');
+    btn.disabled = true; msg.className = 'msg'; msg.textContent = '登録しています…';
+    try {
+      const res = await adm('addItem', { item });
+      if(!res.ok) throw new Error(res.error);
+      toast('登録しました。受付を始めます');
+      tab = 'items'; await refresh();
+    } catch(e){
+      msg.className = 'msg err'; msg.textContent = e.message; btn.disabled = false;
+    }
+  };
+}
+
+/* ---------- 操作 ---------- */
+async function setState(no, state){
+  if(state === '取消' && !confirm(no + ' を取り消します。残り数に戻します。よろしいですか？')) return;
+  const res = await adm('orderState', { no, state });
+  if(!res.ok){ toast(res.error); return; }
+  toast(state === '取消' ? '取り消しました' : '受け取り済みにしました');
+  refresh();
+}
+
+async function closeItem(id){
+  if(!confirm('この魚の受付を締め切ります。よろしいですか？')) return;
+  const res = await adm('closeItem', { id });
+  if(!res.ok){ toast(res.error); return; }
+  toast('受付を締め切りました'); refresh();
+}
+
+function copyAnnounce(id){
+  const it = data.items.find(x => x.id === id);
+  const lines = [
+    '【鮮魚 入荷のお知らせ】',
+    `${it.name}　100g 税込${yen(it.price)}円`,
+    it.weight ? `1尾 約${yen(it.weight)}g（目安 税込${yen(Math.round(it.weight/100*it.price))}円）` : '',
+    it.origin ? `産地：${it.origin}` : '',
+    `残り${it.remain}尾・先着順${it.limit < 99 ? `（お一人様${it.limit}尾まで）` : ''}`,
+    `受け取り：${fmtDate(it.pickupDate)} ${it.pickupTime}`,
+    `締切：${fmtDT(it.deadline)}`,
+    it.fee ? `三枚おろしもできます（＋税込${yen(it.fee)}円／尾）` : '',
+    it.memo || '',
+    '',
+    'ご注文はこちらから',
+    FORM_URL
+  ].filter((l, i, a) => l !== '' || (i > 0 && a[i-1] !== ''));
+  const text = lines.join('\n');
+  const done = () => toast('案内文をコピーしました。LINEに貼り付けてください');
+  if(navigator.clipboard && window.isSecureContext){
+    navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, done));
+  } else fallbackCopy(text, done);
+}
+function fallbackCopy(text, done){
+  const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta);
+  ta.select(); try { document.execCommand('copy'); done(); } catch(e){ prompt('コピーしてください', text); } ta.remove();
+}
+
+async function testLine(){
+  const res = await adm('testLine');
+  toast(res.ok ? 'テスト通知を送りました' : (res.error || '送れませんでした'));
+}
+function logout(){ try { localStorage.removeItem('sengyo_admin_pass'); } catch(e){} pass = ''; loginView(); }
+
+/* ---------- 起動 ---------- */
+try { pass = localStorage.getItem('sengyo_admin_pass') || ''; } catch(e){}
+if(pass) refresh(); else loginView();
+</script>
+</body>
+</html>
