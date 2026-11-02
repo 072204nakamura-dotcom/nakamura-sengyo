@@ -5,11 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex">
 <title>鮮魚 管理</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@700&display=swap" rel="stylesheet">
 <style>
 :root{
   --bg:#F2F5F6; --surface:#FFFFFF; --ink:#1E2528; --sub:#5B676C;
   --ai:#23446A; --ice:#DCE7EB; --rule:#C7D3D8; --red:#9C2B24; --ok:#2E6A4E;
   --sans:"Hiragino Sans","Noto Sans JP","Yu Gothic",system-ui,sans-serif;
+  --num:"Zen Kaku Gothic New",var(--sans);
   color-scheme:light;
 }
 @media (prefers-color-scheme:dark){
@@ -40,15 +44,32 @@ button{font:inherit;cursor:pointer}
 .small{display:inline-block;padding:7px 12px;border-radius:6px;border:1.5px solid var(--ai);background:transparent;color:var(--ai);font-weight:700;font-size:14px}
 .small.solid{background:var(--ai);color:var(--surface)}
 .small.warn{border-color:var(--red);color:var(--red)}
-button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid var(--ai);outline-offset:2px}
+button:focus-visible,input:focus-visible,textarea:focus-visible,.shot:focus-within{outline:3px solid var(--ai);outline-offset:2px}
 .row{padding:12px 0;border-bottom:1px solid var(--rule)}
 .row .t{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
 .row .t b{font-size:18px}
 .row .m{color:var(--sub);font-size:14px}
 .row .acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.fishrow{display:flex;gap:12px;align-items:flex-start}
+.fishrow .body{flex:1;min-width:0}
+.thumb{flex:none;width:72px;height:72px;border-radius:6px;object-fit:cover;background:var(--ice)}
+.thumb.none{display:flex;align-items:center;justify-content:center;color:var(--sub);font-size:12px}
+.group{margin-top:22px}
+.group-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding-bottom:6px;border-bottom:2px solid var(--ai)}
+.group-head b{font-size:18px}
+.group-head .m{color:var(--sub);font-size:14px}
+.num{font-family:var(--num);font-weight:700}
 .badge{font-size:13px;font-weight:700;padding:2px 8px;border-radius:99px;background:var(--ice);color:var(--ai);white-space:nowrap}
 .badge.done{color:var(--ok)}
 .badge.off{color:var(--sub)}
+.note{margin:0 0 4px;font-size:14px}
+.shot{position:relative;display:block;margin-top:12px;padding:16px;border:2px dashed var(--ai);border-radius:8px;text-align:center;color:var(--ai);font-weight:700;cursor:pointer}
+.shot input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
+.preview{display:block;width:100%;margin-top:12px;border-radius:8px}
+.preview[hidden]{display:none}
+.weight input{font-family:var(--num);font-weight:700;font-size:26px;padding:8px 11px}
+.amount{margin:10px 0 0;font-size:16px}
+.amount .num{font-size:28px}
 .msg{margin:10px 0 0;font-weight:700}
 .msg.err{color:var(--red)}
 .msg.ok{color:var(--ok)}
@@ -72,6 +93,11 @@ const app = document.getElementById('app');
 let pass = '';
 let data = { items: [], orders: [] };
 let tab = 'orders';
+let stale = false;   // 登録したあと、入荷・注文の一覧を読み直す必要があるか
+let groups = [];     // 入荷タブの「魚名＋受け取り日」のまとまり
+let shot = null;     // 縮めた写真（data URL）
+let pendingId = '';  // 送信中の1尾の番号（送り直しても二重に登録されないように）
+let added = [];      // この画面で登録した魚
 const yen = n => Number(n || 0).toLocaleString('ja-JP');
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const WD = ['日','月','火','水','木','金','土'];
@@ -79,6 +105,23 @@ function fmtDate(s){ if(!s) return ''; const d = new Date(s.slice(0,10)+'T00:00'
 function fmtDT(s){ return s ? fmtDate(s) + ' ' + s.slice(11,16) : ''; }
 function today(){ const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function toast(t){ const el = document.getElementById('toast'); el.textContent = t; el.classList.add('show'); setTimeout(() => el.classList.remove('show'), 2200); }
+const amountOf = it => Math.round(it.weight / 100 * it.price);
+const isOpen = it => it.state === '受付中' && !it.expired;
+function newId(){ const a = new Uint8Array(4); crypto.getRandomValues(a); return Array.from(a, b => b.toString(16).padStart(2, '0')).join(''); }
+
+let draft = { name: '', price: '', fee: '500', pickupDate: today(), pickupTime: '17:00〜18:00', deadline: today() + 'T15:00', origin: '', memo: '' };
+
+// ドライブの写真。サムネイルが出ないときは別の住所で読み直し、それでもだめなら隠す
+function photoUrl(id, w){ return `https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w${w}`; }
+function photoFallback(img){
+  if(img.dataset.fb){ img.hidden = true; return; }
+  img.dataset.fb = '1';
+  img.src = `https://lh3.googleusercontent.com/d/${encodeURIComponent(img.dataset.id)}=w${img.dataset.w}`;
+}
+function thumb(id){
+  return id ? `<img class="thumb" src="${photoUrl(id, 200)}" data-id="${esc(id)}" data-w="200" alt="" loading="lazy" onerror="photoFallback(this)">`
+    : '<span class="thumb none">写真なし</span>';
+}
 
 async function api(action, d){
   const url = GAS_URL + '?action=' + action + '&data=' + encodeURIComponent(JSON.stringify(d || {})) + '&t=' + Date.now();
@@ -109,7 +152,7 @@ async function refresh(fromLogin){
       if(res.code === 'auth'){ try { localStorage.removeItem('sengyo_admin_pass'); } catch(e){} loginView(fromLogin ? 'パスワードが違います' : ''); return false; }
       throw new Error(res.error);
     }
-    data = res; render(); return true;
+    data = res; stale = false; render(); return true;
   } catch(e){
     app.innerHTML = `<h1>鮮魚 管理</h1><p class="msg err">読み込めませんでした：${esc(e.message)}</p><button class="btn ghost" onclick="refresh()">もう一度</button>`;
     return false;
@@ -117,17 +160,19 @@ async function refresh(fromLogin){
 }
 
 /* ---------- 画面 ---------- */
+function showTab(t){ tab = t; if(stale && t !== 'add') refresh(); else render(); }
+
 function render(){
   app.innerHTML = `<h1>鮮魚 管理</h1>
     <div class="tabs">
-      <button aria-pressed="${tab==='orders'}" onclick="tab='orders';render()">注文</button>
-      <button aria-pressed="${tab==='items'}" onclick="tab='items';render()">入荷</button>
-      <button aria-pressed="${tab==='add'}" onclick="tab='add';render()">入荷を登録</button>
+      <button aria-pressed="${tab==='orders'}" onclick="showTab('orders')">注文</button>
+      <button aria-pressed="${tab==='items'}" onclick="showTab('items')">入荷</button>
+      <button aria-pressed="${tab==='add'}" onclick="showTab('add')">入荷を登録</button>
     </div>
     <section class="panel" ${tab==='orders'?'':'hidden'}>${ordersView()}</section>
     <section class="panel" ${tab==='items'?'':'hidden'}>${itemsView()}</section>
     <section class="panel" ${tab==='add'?'':'hidden'}>${addView()}</section>
-    <button class="btn ghost" onclick="refresh()">最新にする</button>
+    ${tab === 'add' ? '' : '<button class="btn ghost" onclick="refresh()">最新にする</button>'}
     <p class="foot">注文フォーム：${esc(FORM_URL)}<br>
       <button class="small" onclick="testLine()">LINE通知のテスト</button>
       <button class="small" onclick="logout()">ログアウト</button></p>`;
@@ -137,15 +182,18 @@ function render(){
 function ordersView(){
   const wait = data.orders.filter(o => o.state === '受付');
   const rest = data.orders.filter(o => o.state !== '受付');
-  const row = o => `<div class="row">
-      <div class="t"><b>${esc(o.name)} ×${o.qty}</b><span class="badge ${o.state==='受け取り済み'?'done':o.state==='取消'?'off':''}">${esc(o.state)}</span></div>
-      <div class="m">${esc(o.no)}　${esc(o.style)}　目安 税込${yen(o.estimate)}円</div>
-      <div class="m">${esc(o.customer)} さん　<a href="tel:${esc(o.tel)}">${esc(o.tel)}</a></div>
-      <div class="m">受け取り ${fmtDate(o.pickupDate)} ${esc(o.pickupTime)}</div>
-      ${o.note ? `<div class="m">ご要望：${esc(o.note)}</div>` : ''}
-      ${o.state === '受付' ? `<div class="acts">
-        <button class="small solid" onclick="setState('${esc(o.no)}','受け取り済み')">受け取り済み</button>
-        <button class="small warn" onclick="setState('${esc(o.no)}','取消')">取消</button></div>` : ''}
+  const row = o => `<div class="row fishrow">
+      ${o.photo ? thumb(o.photo) : ''}
+      <div class="body">
+        <div class="t"><b>${esc(o.name)}${o.weight ? ' <span class="num">' + yen(o.weight) + '</span>g' : ''}${o.qty > 1 ? ' ×' + o.qty : ''}</b><span class="badge ${o.state==='受け取り済み'?'done':o.state==='取消'?'off':''}">${esc(o.state)}</span></div>
+        <div class="m">${esc(o.no)}　${esc(o.style)}　税込<span class="num">${yen(o.amount)}</span>円</div>
+        <div class="m">${esc(o.customer)} さん　<a href="tel:${esc(o.tel)}">${esc(o.tel)}</a></div>
+        <div class="m">受け取り ${fmtDate(o.pickupDate)} ${esc(o.pickupTime)}</div>
+        ${o.note ? `<div class="m">ご要望：${esc(o.note)}</div>` : ''}
+        ${o.state === '受付' ? `<div class="acts">
+          <button class="small solid" onclick="setState('${esc(o.no)}','受け取り済み')">受け取り済み</button>
+          <button class="small warn" onclick="setState('${esc(o.no)}','取消')">取消</button></div>` : ''}
+      </div>
     </div>`;
   return `<h2>受け取り待ち（${wait.length}件）</h2>
     ${wait.length ? wait.map(row).join('') : '<p class="empty">受け取り待ちの注文はありません。</p>'}
@@ -154,63 +202,153 @@ function ordersView(){
 
 function itemsView(){
   if(!data.items.length) return '<p class="empty">まだ入荷の登録がありません。「入荷を登録」から始めてください。</p>';
-  return '<h2>入荷した魚</h2>' + data.items.map(it => {
-    const open = it.state === '受付中' && !it.expired;
+  groups = [];
+  data.items.forEach(it => {
+    const k = it.name + '|' + it.pickupDate;
+    let g = groups.find(x => x.k === k);
+    if(!g){ g = { k, name: it.name, pickupDate: it.pickupDate, list: [] }; groups.push(g); }
+    g.list.push(it);
+  });
+  const fishRow = it => {
+    const open = isOpen(it);
     const st = open ? (it.remain > 0 ? '受付中' : '売り切れ') : '締切';
-    return `<div class="row">
-      <div class="t"><b>${esc(it.name)}</b><span class="badge ${open?'':'off'}">${st}</span></div>
-      <div class="m">100g 税込${yen(it.price)}円　1尾 約${yen(it.weight)}g　残り ${it.remain}／${it.total}尾</div>
-      <div class="m">受け取り ${fmtDate(it.pickupDate)} ${esc(it.pickupTime)}　締切 ${fmtDT(it.deadline)}</div>
-      ${it.origin ? `<div class="m">産地 ${esc(it.origin)}</div>` : ''}
-      <div class="acts">
-        ${open ? `<button class="small solid" onclick="copyAnnounce('${esc(it.id)}')">LINE案内文をコピー</button>
-        <button class="small warn" onclick="closeItem('${esc(it.id)}')">受付を締め切る</button>` : ''}
+    return `<div class="row fishrow">
+      ${thumb(it.photo)}
+      <div class="body">
+        <div class="t"><b>${it.weight ? '<span class="num">' + yen(it.weight) + '</span>g' : esc(it.name)}</b><span class="badge ${open && it.remain > 0 ? '' : 'off'}">${st}</span></div>
+        <div class="m">税込<span class="num">${yen(amountOf(it))}</span>円　100g ${yen(it.price)}円${it.total > 1 ? `　残り ${it.remain}／${it.total}尾` : ''}</div>
+        <div class="m">締切 ${fmtDT(it.deadline)}</div>
+        ${open && it.remain > 0 ? `<div class="acts"><button class="small warn" onclick="closeItem('${esc(it.id)}')">受付を締め切る</button></div>` : ''}
       </div>
+    </div>`;
+  };
+  return groups.map((g, i) => {
+    const left = g.list.filter(isOpen).reduce((n, it) => n + it.remain, 0);
+    return `<div class="group">
+      <div class="group-head">
+        <div><b>${esc(g.name)}</b>　<span class="m">受け取り ${fmtDate(g.pickupDate)}・残り${left}尾</span></div>
+        ${left ? `<button class="small solid" onclick="copyAnnounce(${i})">LINE案内文をコピー</button>` : ''}
+      </div>
+      ${g.list.map(fishRow).join('')}
     </div>`;
   }).join('');
 }
 
 function addView(){
+  const v = k => esc(draft[k]);
   return `<h2>入荷を登録</h2>
-    <form id="addForm" novalidate>
-      <div class="field"><label for="a-name">魚の名前</label><input id="a-name" placeholder="例：真鯛"></div>
-      <div class="grid">
-        <div class="field"><label for="a-price">100gの値段 <small>税込</small></label><input id="a-price" type="number" inputmode="numeric" placeholder="150"></div>
-        <div class="field"><label for="a-weight">1尾の目安 <small>g</small></label><input id="a-weight" type="number" inputmode="numeric" placeholder="1500"></div>
-        <div class="field"><label for="a-total">入荷数 <small>尾</small></label><input id="a-total" type="number" inputmode="numeric" placeholder="3"></div>
-        <div class="field"><label for="a-limit">1人の上限 <small>尾</small></label><input id="a-limit" type="number" inputmode="numeric" value="1"></div>
-      </div>
-      <div class="field"><label for="a-fee">三枚おろしの手間賃 <small>税込・1尾</small></label><input id="a-fee" type="number" inputmode="numeric" value="500"></div>
-      <div class="grid">
-        <div class="field"><label for="a-pdate">受け取り日</label><input id="a-pdate" type="date" value="${today()}"></div>
-        <div class="field"><label for="a-ptime">受け取り時間</label><input id="a-ptime" value="17:00〜18:00"></div>
-      </div>
-      <div class="field"><label for="a-deadline">注文の締切</label><input id="a-deadline" type="datetime-local" value="${today()}T15:00"></div>
-      <div class="field"><label for="a-origin">産地 <small>その日に確認できたときだけ</small></label><input id="a-origin" placeholder="空欄のままでOK"></div>
-      <div class="field"><label for="a-memo">ひとこと <small>任意</small></label><textarea id="a-memo" placeholder="例：刺身でも煮付けでもおいしいサイズです"></textarea></div>
-      <p class="msg" id="a-msg" role="alert"></p>
-      <button class="btn" type="submit" id="a-send">登録して受付を始める</button>
-    </form>`;
+    <p class="note">1尾ずつ量りに乗せて写真を撮り、重さを入れて登録します。「魚の名前」から「ひとこと」までは、続けて登録するあいだそのまま残ります。</p>
+    <div class="field"><label for="a-name">魚の名前</label><input id="a-name" data-k="name" placeholder="例：真鯛" value="${v('name')}"></div>
+    <div class="grid">
+      <div class="field"><label for="a-price">100gの値段 <small>税込</small></label><input id="a-price" data-k="price" type="number" inputmode="numeric" placeholder="150" value="${v('price')}"></div>
+      <div class="field"><label for="a-fee">三枚おろし手間賃 <small>税込・1尾</small></label><input id="a-fee" data-k="fee" type="number" inputmode="numeric" value="${v('fee')}"></div>
+    </div>
+    <div class="grid">
+      <div class="field"><label for="a-pdate">受け取り日</label><input id="a-pdate" data-k="pickupDate" type="date" value="${v('pickupDate')}"></div>
+      <div class="field"><label for="a-ptime">受け取り時間</label><input id="a-ptime" data-k="pickupTime" value="${v('pickupTime')}"></div>
+    </div>
+    <div class="field"><label for="a-deadline">注文の締切</label><input id="a-deadline" data-k="deadline" type="datetime-local" value="${v('deadline')}"></div>
+    <div class="field"><label for="a-origin">産地 <small>その日に確認できたときだけ</small></label><input id="a-origin" data-k="origin" placeholder="空欄のままでOK" value="${v('origin')}"></div>
+    <div class="field"><label for="a-memo">ひとこと <small>任意</small></label><textarea id="a-memo" data-k="memo" placeholder="例：刺身でも煮付けでもおいしいサイズです">${v('memo')}</textarea></div>
+
+    <h2>1尾ずつ登録</h2>
+    <label class="shot"><span id="a-shot-label">${shot ? '写真を撮り直す' : '量りに乗せた写真を撮る'}</span><input type="file" id="a-photo" accept="image/*"></label>
+    <img class="preview" id="a-preview" alt="量りに乗せた魚の写真" ${shot ? `src="${shot}"` : 'hidden'}>
+    <div class="field weight"><label for="a-weight">量りの重さ <small>g・写真の数字を入れる</small></label><input id="a-weight" type="number" inputmode="numeric" placeholder="1240"></div>
+    <p class="amount" id="a-amount"></p>
+    <p class="msg" id="a-msg" role="alert"></p>
+    <button class="btn" id="a-send">この1尾を登録する</button>
+    ${added.length ? `<h2>この画面で登録した魚（${added.length}尾）</h2>` + added.map(a => `<div class="row fishrow">
+        ${a.photo ? `<img class="thumb" src="${a.photo}" alt="">` : '<span class="thumb none">写真なし</span>'}
+        <div class="body"><div class="t"><b>${esc(a.name)} <span class="num">${yen(a.weight)}</span>g</b><span class="badge">受付中</span></div>
+        <div class="m">税込<span class="num">${yen(a.amount)}</span>円</div></div>
+      </div>`).join('') : ''}`;
 }
 
 function bindAdd(){
-  const f = document.getElementById('addForm');
-  f.onsubmit = async ev => {
-    ev.preventDefault();
-    const v = id => document.getElementById(id).value.trim();
-    const item = { name: v('a-name'), price: v('a-price'), weight: v('a-weight'), total: v('a-total'), limit: v('a-limit'),
-      fee: v('a-fee'), pickupDate: v('a-pdate'), pickupTime: v('a-ptime'), deadline: v('a-deadline'), origin: v('a-origin'), memo: v('a-memo') };
-    const msg = document.getElementById('a-msg'); const btn = document.getElementById('a-send');
-    btn.disabled = true; msg.className = 'msg'; msg.textContent = '登録しています…';
+  document.querySelectorAll('[data-k]').forEach(el => el.oninput = () => { draft[el.dataset.k] = el.value; showAmount(); });
+  document.getElementById('a-weight').oninput = showAmount;
+  document.getElementById('a-photo').onchange = async ev => {
+    const file = ev.target.files[0];
+    if(!file) return;
+    const msg = document.getElementById('a-msg');
+    msg.className = 'msg'; msg.textContent = '写真を読み込んでいます…';
     try {
-      const res = await adm('addItem', { item });
-      if(!res.ok) throw new Error(res.error);
-      toast('登録しました。受付を始めます');
-      tab = 'items'; await refresh();
+      shot = await shrink(file);
+      pendingId = '';
+      const img = document.getElementById('a-preview');
+      img.src = shot; img.hidden = false;
+      document.getElementById('a-shot-label').textContent = '写真を撮り直す';
+      msg.textContent = '';
     } catch(e){
-      msg.className = 'msg err'; msg.textContent = e.message; btn.disabled = false;
+      msg.className = 'msg err'; msg.textContent = e.message;
     }
+    ev.target.value = '';
   };
+  document.getElementById('a-send').onclick = sendFish;
+  showAmount();
+}
+
+function showAmount(){
+  const w = Number(document.getElementById('a-weight').value), p = Number(draft.price);
+  document.getElementById('a-amount').innerHTML = w > 0 && p > 0 ? `この1尾　税込 <span class="num">${yen(Math.round(w / 100 * p))}</span>円` : '';
+}
+
+// 写真を長いほう1200pxまで縮める（送る量を減らすため）
+function shrink(file){
+  return new Promise((ok, ng) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const s = Math.min(1, 1200 / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.naturalWidth * s);
+      c.height = Math.round(img.naturalHeight * s);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      ok(c.toDataURL('image/jpeg', 0.82));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); ng(new Error('写真を読み込めませんでした。もう一度撮ってください')); };
+    img.src = url;
+  });
+}
+
+async function sendFish(){
+  const msg = document.getElementById('a-msg');
+  const btn = document.getElementById('a-send');
+  const weight = document.getElementById('a-weight').value.trim();
+  const err = !draft.name.trim() ? '魚の名前を入れてください'
+    : !(Number(draft.price) > 0) ? '100gの値段を入れてください'
+    : !(Number(weight) > 0) ? '量りの重さを入れてください'
+    : !draft.deadline ? '締切を入れてください' : '';
+  if(err){ msg.className = 'msg err'; msg.textContent = err; return; }
+  if(!shot && !confirm('写真なしで登録しますか？')) return;
+  if(!pendingId) pendingId = newId();
+  const item = Object.assign({}, draft, { id: pendingId, weight });
+  btn.disabled = true; msg.className = 'msg'; msg.textContent = '登録しています…';
+  try {
+    // 返事が読めない送り方（no-cors）なので、送ったあと登録できたかを読みに行く
+    await fetch(GAS_URL, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ op: 'addFish', pass, item, photo: shot || '' }) });
+    const res = await confirmFish(item.id);
+    if(!res.found) throw new Error(res.error || '登録を確かめられませんでした。電波の良い場所で、もう一度押してください');
+    added.unshift({ name: item.name, weight: Number(weight), amount: Math.round(weight / 100 * item.price), photo: shot });
+    shot = null; pendingId = ''; stale = true;
+    toast(`${item.name} ${yen(weight)}g を登録しました`);
+    render();
+    window.scrollTo({ top: document.getElementById('a-shot-label').getBoundingClientRect().top + window.scrollY - 80 });
+  } catch(e){
+    msg.className = 'msg err'; msg.textContent = e.message; btn.disabled = false;
+  }
+}
+
+async function confirmFish(id){
+  for(let i = 0; i < 4; i++){
+    const res = await adm('hasItem', { id });
+    if(res.found || res.error) return res;
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  return { found: false };
 }
 
 /* ---------- 操作 ---------- */
@@ -223,28 +361,34 @@ async function setState(no, state){
 }
 
 async function closeItem(id){
-  if(!confirm('この魚の受付を締め切ります。よろしいですか？')) return;
+  if(!confirm('この1尾の受付を締め切ります。よろしいですか？')) return;
   const res = await adm('closeItem', { id });
   if(!res.ok){ toast(res.error); return; }
   toast('受付を締め切りました'); refresh();
 }
 
-function copyAnnounce(id){
-  const it = data.items.find(x => x.id === id);
+function copyAnnounce(i){
+  const g = groups[i];
+  const open = g.list.filter(it => isOpen(it) && it.remain > 0);
+  if(!open.length){ toast('受付中の魚がありません'); return; }
+  const first = open[0];
+  const count = open.reduce((n, it) => n + it.remain, 0);
+  const ws = open.map(it => it.weight).filter(Boolean);
+  const range = (a, unit) => { const lo = Math.min(...a), hi = Math.max(...a); return lo === hi ? yen(lo) + unit : `${yen(lo)}〜${yen(hi)}${unit}`; };
   const lines = [
     '【鮮魚 入荷のお知らせ】',
-    `${it.name}　100g 税込${yen(it.price)}円`,
-    it.weight ? `1尾 約${yen(it.weight)}g（目安 税込${yen(Math.round(it.weight/100*it.price))}円）` : '',
-    it.origin ? `産地：${it.origin}` : '',
-    `残り${it.remain}尾・先着順${it.limit < 99 ? `（お一人様${it.limit}尾まで）` : ''}`,
-    `受け取り：${fmtDate(it.pickupDate)} ${it.pickupTime}`,
-    `締切：${fmtDT(it.deadline)}`,
-    it.fee ? `三枚おろしもできます（＋税込${yen(it.fee)}円／尾）` : '',
-    it.memo || '',
+    `${g.name}　100g 税込${yen(first.price)}円`,
+    ws.length ? `${count}尾（${range(ws, 'g')}・税込${range(open.map(amountOf), '円')}）` : `${count}尾`,
+    first.origin ? `産地：${first.origin}` : null,
+    '1尾ずつ量った写真と金額を載せています。先着順です。',
+    `受け取り：${fmtDate(g.pickupDate)} ${first.pickupTime}`,
+    `締切：${fmtDT(open.map(it => it.deadline).sort()[0])}`,
+    first.fee ? `三枚おろしもできます（＋税込${yen(first.fee)}円／尾）` : null,
+    first.memo || null,
     '',
     'ご注文はこちらから',
     FORM_URL
-  ].filter((l, i, a) => l !== '' || (i > 0 && a[i-1] !== ''));
+  ].filter(l => l !== null); // 空欄の項目は行ごと省く
   const text = lines.join('\n');
   const done = () => toast('案内文をコピーしました。LINEに貼り付けてください');
   if(navigator.clipboard && window.isSecureContext){

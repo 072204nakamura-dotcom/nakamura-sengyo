@@ -3,21 +3,24 @@
  *
  * はじめにやること（くわしくは「設定手順.md」）
  *  1) 下の SPREADSHEET_ID を自分のスプレッドシートのIDに書き換える
- *  2) 関数「setup」を1回だけ実行する（シートが2枚できる）
+ *  2) 関数「setup」を実行する（シートが2枚と、写真を入れるドライブのフォルダができる）
  *  3) スクリプト プロパティに ADMIN_PASS / LINE_TOKEN / LINE_TO を登録する
  *  4) ウェブアプリとしてデプロイ（アクセスできるユーザー：全員）
  *
  * パスワードやLINEのトークンは、このコードには書かずに
  * 「スクリプト プロパティ」に保存します。
+ *
+ * 魚は1尾ずつ量りに乗せて写真を撮り、重さを入れて登録する（1行＝1尾）。
+ * 写真はドライブの「鮮魚の写真」フォルダに保存し、リンクを知っている人が見られる設定にする。
  */
 
 const SPREADSHEET_ID = '14TeXUIa9000q1OuRk7LlyHNWq7uaqnm7Uv8azjqbI8c';
 const TZ = 'Asia/Tokyo';
 
-const ITEM_HEAD = ['id', '魚名', '100g単価(税込)', '目安重量(g)', '入荷数', '残り', '1人上限',
-  '三枚おろし手間賃(税込)', '受け取り日', '受け取り時間', '締切', '産地', 'メモ', '状態', '登録日時'];
+const ITEM_HEAD = ['id', '魚名', '100g単価(税込)', '重さ(g)', '入荷数', '残り', '1人上限',
+  '三枚おろし手間賃(税込)', '受け取り日', '受け取り時間', '締切', '産地', 'メモ', '状態', '登録日時', '写真'];
 const ORDER_HEAD = ['受付番号', '受付日時', '入荷id', '魚名', '数', '渡し方', 'お名前', '電話番号',
-  '受け取り日', '受け取り時間', '目安金額(税込)', 'ご要望', '状態'];
+  '受け取り日', '受け取り時間', '金額(税込)', 'ご要望', '状態', '重さ(g)'];
 
 /* ---------- 共通の道具 ---------- */
 function ss_() { return SpreadsheetApp.openById(SPREADSHEET_ID); }
@@ -57,7 +60,7 @@ function deadlinePassed_(it) {
   }
 }
 
-/* ---------- 最初に1回だけ実行 ---------- */
+/* ---------- 最初に実行（もう一度実行しても、入っているデータはそのまま） ---------- */
 function setup() {
   const ss = ss_();
   [['入荷', ITEM_HEAD], ['注文', ORDER_HEAD]].forEach(function (pair) {
@@ -66,9 +69,10 @@ function setup() {
     sh.getRange(1, 1, 1, pair[1].length).setValues([pair[1]]).setFontWeight('bold');
     sh.setFrozenRows(1);
   });
+  Logger.log('準備できました。写真の保存先：' + photoFolder_().getUrl());
 }
 
-/* ---------- 入口（すべてGETで受ける） ---------- */
+/* ---------- 入口（写真つきの登録だけPOST、ほかはすべてGET） ---------- */
 function doGet(e) {
   const p = (e && e.parameter) || {};
   try {
@@ -82,13 +86,29 @@ function doGet(e) {
   }
 }
 
+// 写真はURLに入らない大きさなので、登録はPOSTで受ける
+function doPost(e) {
+  let d = {};
+  let res;
+  try {
+    d = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    res = d.op === 'addFish' ? admin_(d) : { ok: false, error: 'unknown op' };
+  } catch (err) {
+    res = { ok: false, error: String(err) };
+  }
+  // no-cors で送られるので返事はブラウザに届かない。失敗の理由は hasItem で読めるよう10分だけ残す
+  const id = d.item && d.item.id;
+  if (!res.ok && id) CacheService.getScriptCache().put('post_' + String(id).slice(0, 20), String(res.error), 600);
+  return out_(res);
+}
+
 /* ---------- お客さん向け ---------- */
 function publicItem_(it) {
   return {
     id: String(it.id),
     name: String(it['魚名']),
     price: Number(it['100g単価(税込)']) || 0,
-    weight: Number(it['目安重量(g)']) || 0,
+    weight: Number(it['重さ(g)']) || 0,
     total: Number(it['入荷数']) || 0,
     remain: Number(it['残り']) || 0,
     limit: Number(it['1人上限']) || 1,
@@ -98,7 +118,8 @@ function publicItem_(it) {
     deadline: str_(it['締切'], "yyyy-MM-dd'T'HH:mm"),
     origin: String(it['産地']),
     memo: String(it['メモ']),
-    state: String(it['状態'])
+    state: String(it['状態']),
+    photo: str_(it['写真'])
   };
 }
 
@@ -108,8 +129,8 @@ function openItems_() {
     .map(publicItem_);
 }
 
-function estimate_(it, qty, style) {
-  const one = Math.round((Number(it['目安重量(g)']) || 0) / 100 * (Number(it['100g単価(税込)']) || 0));
+function amount_(it, qty, style) {
+  const one = Math.round((Number(it['重さ(g)']) || 0) / 100 * (Number(it['100g単価(税込)']) || 0));
   const fee = style === '三枚おろし' ? (Number(it['三枚おろし手間賃(税込)']) || 0) : 0;
   return (one + fee) * qty;
 }
@@ -126,10 +147,10 @@ function placeOrder_(d) {
   const lock = LockService.getScriptLock();
   lock.waitLock(15000); // 同時に注文が来ても1件ずつ処理する
   let res;
-  let itemCopy;
   try {
     const sh = sheet_('入荷');
-    const it = rows_(sh).filter(function (r) { return String(r.id) === String(d.id); })[0];
+    const all = rows_(sh);
+    const it = all.filter(function (r) { return String(r.id) === String(d.id); })[0];
     if (!it || it['状態'] !== '受付中' || deadlinePassed_(it)) {
       res = { ok: false, code: 'closed', error: 'この魚の受付は終了しました' };
     } else {
@@ -140,7 +161,7 @@ function placeOrder_(d) {
       } else if (qty > remain) {
         res = {
           ok: false, code: 'soldout', remain: remain,
-          error: remain > 0 ? '残りが' + remain + '尾になりました。数を選び直してください' : '売り切れました'
+          error: remain > 0 ? '残りが' + remain + '尾になりました。数を選び直してください' : '先に注文が入り、売り切れました'
         };
       } else {
         setCell_(sh, it._row, ITEM_HEAD, '残り', remain - qty);
@@ -150,16 +171,21 @@ function placeOrder_(d) {
           return String(o['受付番号']).indexOf('F' + today) === 0;
         }).length;
         const no = 'F' + today + '-' + ('00' + (count + 1)).slice(-3);
-        const est = estimate_(it, qty, style);
+        const amount = amount_(it, qty, style);
+        const weight = Number(it['重さ(g)']) || 0;
         const pDate = str_(it['受け取り日'], 'yyyy-MM-dd');
         const pTime = String(it['受け取り時間']);
         osh.appendRow([no, now_(), String(it.id), String(it['魚名']), String(qty), style, name, tel,
-          pDate, pTime, String(est), clean_(d.note, 200), '受付']);
+          pDate, pTime, String(amount), clean_(d.note, 200), '受付', String(weight)]);
         SpreadsheetApp.flush();
-        itemCopy = it;
+        // 同じ魚・同じ受け取り日で、まだ注文できる尾数（LINE通知用）
+        const left = all.filter(function (r) {
+          return String(r['魚名']) === String(it['魚名']) && str_(r['受け取り日'], 'yyyy-MM-dd') === pDate &&
+            r['状態'] === '受付中' && !deadlinePassed_(r);
+        }).reduce(function (n, r) { return n + (Number(r['残り']) || 0); }, 0) - qty;
         res = {
-          ok: true, no: no, name: String(it['魚名']), qty: qty, style: style, estimate: est,
-          pickupDate: pDate, pickupTime: pTime, remainAfter: remain - qty, note: clean_(d.note, 200)
+          ok: true, no: no, name: String(it['魚名']), weight: weight, qty: qty, style: style, amount: amount,
+          pickupDate: pDate, pickupTime: pTime, left: left, note: clean_(d.note, 200)
         };
       }
     }
@@ -170,11 +196,11 @@ function placeOrder_(d) {
   if (res.ok) {
     notify_([
       '【鮮魚の注文】' + res.no,
-      res.name + ' ×' + res.qty + '（' + res.style + '）',
+      res.name + (res.weight ? ' ' + res.weight.toLocaleString() + 'g' : '') + ' ×' + res.qty + '（' + res.style + '）',
       name + ' さん　' + tel,
       '受け取り ' + res.pickupDate + ' ' + res.pickupTime,
-      '目安 税込' + res.estimate.toLocaleString() + '円',
-      '残り ' + res.remainAfter + '尾',
+      '税込' + res.amount.toLocaleString() + '円',
+      res.name + 'の残り ' + res.left + '尾',
       res.note ? 'ご要望：' + res.note : ''
     ].filter(String).join('\n'));
   }
@@ -188,7 +214,10 @@ function admin_(d) {
   }
 
   if (d.op === 'list') {
-    const items = rows_(sheet_('入荷')).reverse().slice(0, 30).map(function (it) {
+    const itemRows = rows_(sheet_('入荷'));
+    const photos = {};
+    itemRows.forEach(function (it) { photos[String(it.id)] = str_(it['写真']); });
+    const items = itemRows.reverse().slice(0, 60).map(function (it) {
       const o = publicItem_(it);
       o.expired = deadlinePassed_(it);
       return o;
@@ -196,30 +225,49 @@ function admin_(d) {
     const orders = rows_(sheet_('注文')).reverse().slice(0, 150).map(function (o) {
       return {
         no: String(o['受付番号']), at: str_(o['受付日時'], 'yyyy-MM-dd HH:mm'), itemId: String(o['入荷id']),
-        name: String(o['魚名']), qty: Number(o['数']) || 0, style: String(o['渡し方']),
-        customer: String(o['お名前']), tel: String(o['電話番号']),
+        name: String(o['魚名']), weight: Number(o['重さ(g)']) || 0, qty: Number(o['数']) || 0,
+        style: String(o['渡し方']), customer: String(o['お名前']), tel: String(o['電話番号']),
         pickupDate: str_(o['受け取り日'], 'yyyy-MM-dd'), pickupTime: String(o['受け取り時間']),
-        estimate: Number(o['目安金額(税込)']) || 0, note: String(o['ご要望']), state: String(o['状態'])
+        amount: Number(o['金額(税込)']) || 0, note: String(o['ご要望']), state: String(o['状態']),
+        photo: photos[String(o['入荷id'])] || ''
       };
     });
     return { ok: true, items: items, orders: orders };
   }
 
-  if (d.op === 'addItem') {
+  if (d.op === 'addFish') {
     const f = d.item || {};
+    const id = String(f.id || '');
     const name = clean_(f.name, 30);
     const price = Math.round(Number(f.price));
-    const total = parseInt(f.total, 10);
+    const weight = Math.round(Number(f.weight));
+    if (!/^[0-9a-f]{8}$/.test(id)) return { ok: false, error: '登録番号が正しくありません' };
     if (!name) return { ok: false, error: '魚の名前を入れてください' };
     if (!(price > 0)) return { ok: false, error: '100gあたりの値段を入れてください' };
-    if (!(total > 0)) return { ok: false, error: '入荷数を入れてください' };
+    if (!(weight > 0)) return { ok: false, error: '量りの重さを入れてください' };
     if (!f.deadline) return { ok: false, error: '締切を入れてください' };
-    const id = Utilities.getUuid().slice(0, 8);
-    sheet_('入荷').appendRow([id, name, String(price), String(Math.round(Number(f.weight)) || 0),
-      String(total), String(total), String(parseInt(f.limit, 10) || 1),
-      String(Math.round(Number(f.fee)) || 0), clean_(f.pickupDate, 10), clean_(f.pickupTime, 30),
-      clean_(f.deadline, 16), clean_(f.origin, 40), clean_(f.memo, 200), '受付中', now_()]);
-    return { ok: true, id: id };
+    const lock = LockService.getScriptLock();
+    lock.waitLock(15000);
+    try {
+      const sh = sheet_('入荷');
+      // 電波が悪くて同じ1尾を2回送ったときは、2回目を無視する
+      if (rows_(sh).some(function (r) { return String(r.id) === id; })) return { ok: true, id: id };
+      const photo = savePhoto_(d.photo, id, name);
+      sh.appendRow([id, name, String(price), String(weight), '1', '1', '1',
+        String(Math.round(Number(f.fee)) || 0), clean_(f.pickupDate, 10), clean_(f.pickupTime, 30),
+        clean_(f.deadline, 16), clean_(f.origin, 40), clean_(f.memo, 200), '受付中', now_(), photo]);
+      SpreadsheetApp.flush();
+      return { ok: true, id: id };
+    } finally {
+      lock.releaseLock();
+    }
+  }
+
+  // POSTの返事は読めないので、登録できたかをここで確かめる
+  if (d.op === 'hasItem') {
+    const found = rows_(sheet_('入荷')).some(function (r) { return String(r.id) === String(d.id); });
+    const error = found ? '' : (CacheService.getScriptCache().get('post_' + String(d.id).slice(0, 20)) || '');
+    return { ok: true, found: found, error: error };
   }
 
   if (d.op === 'closeItem') {
@@ -259,6 +307,35 @@ function admin_(d) {
   }
 
   return { ok: false, error: 'unknown op' };
+}
+
+/* ---------- 写真 ---------- */
+// data:image/jpeg;base64,… を「鮮魚の写真」フォルダに保存して、ファイルIDを返す
+function savePhoto_(dataUrl, id, name) {
+  if (!dataUrl) return '';
+  const m = String(dataUrl).match(/^data:(image\/(?:jpeg|png));base64,([A-Za-z0-9+\/=]+)$/);
+  if (!m) throw new Error('写真の形式が違います');
+  if (m[2].length > 8000000) throw new Error('写真が大きすぎます');
+  const ext = m[1] === 'image/png' ? '.png' : '.jpg';
+  const blob = Utilities.newBlob(Utilities.base64Decode(m[2]), m[1], id + '_' + name + ext);
+  const file = photoFolder_().createFile(blob);
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); // 注文フォームに出すため
+  return file.getId();
+}
+
+function photoFolder_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('PHOTO_FOLDER');
+  if (id) {
+    try {
+      return DriveApp.getFolderById(id);
+    } catch (e) {
+      // フォルダを消してしまったときは作り直す
+    }
+  }
+  const folder = DriveApp.createFolder('鮮魚の写真');
+  props.setProperty('PHOTO_FOLDER', folder.getId());
+  return folder;
 }
 
 /* ---------- LINE通知 ---------- */
