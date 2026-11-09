@@ -50,6 +50,14 @@ function rows_(sh) {
 function setCell_(sh, row, head, col, val) {
   sh.getRange(row, head.indexOf(col) + 1).setValue(String(val));
 }
+// 1行を文字のまま足す（appendRow だと締切が日付に、電話番号が数字に変わってしまうため）
+function appendText_(sh, row) {
+  sh.getRange(sh.getLastRow() + 1, 1, 1, row.length).setNumberFormat('@').setValues([row]);
+}
+// スプレッドシートの時間帯を東京にそろえる（clasp で作ると東京以外になっていて、日時が9時間ずれた）
+function fixTimeZone_(ss) {
+  if (ss.getSpreadsheetTimeZone() !== TZ) ss.setSpreadsheetTimeZone(TZ);
+}
 function deadlinePassed_(it) {
   const s = str_(it['締切'], "yyyy-MM-dd'T'HH:mm").replace(' ', 'T').slice(0, 16);
   if (!s) return false;
@@ -63,6 +71,7 @@ function deadlinePassed_(it) {
 /* ---------- 最初に実行（もう一度実行しても、入っているデータはそのまま） ---------- */
 function setup() {
   const ss = ss_();
+  fixTimeZone_(ss);
   [['入荷', ITEM_HEAD], ['注文', ORDER_HEAD]].forEach(function (pair) {
     const sh = ss.getSheetByName(pair[0]) || ss.insertSheet(pair[0]);
     sh.getRange('A:Z').setNumberFormat('@'); // 電話番号の先頭0や日付が勝手に変わらないよう文字として保存
@@ -175,7 +184,7 @@ function placeOrder_(d) {
         const weight = Number(it['重さ(g)']) || 0;
         const pDate = str_(it['受け取り日'], 'yyyy-MM-dd');
         const pTime = String(it['受け取り時間']);
-        osh.appendRow([no, now_(), String(it.id), String(it['魚名']), String(qty), style, name, tel,
+        appendText_(osh, [no, now_(), String(it.id), String(it['魚名']), String(qty), style, name, tel,
           pDate, pTime, String(amount), clean_(d.note, 200), '受付', String(weight)]);
         SpreadsheetApp.flush();
         // 同じ魚・同じ受け取り日で、まだ注文できる尾数（LINE通知用）
@@ -214,6 +223,7 @@ function admin_(d) {
   }
 
   if (d.op === 'list') {
+    fixTimeZone_(ss_()); // 管理画面を開いたときに一度そろえる（店主がsetupをやり直さなくて済むように）
     const itemRows = rows_(sheet_('入荷'));
     const photos = {};
     itemRows.forEach(function (it) { photos[String(it.id)] = str_(it['写真']); });
@@ -253,7 +263,7 @@ function admin_(d) {
       // 電波が悪くて同じ1尾を2回送ったときは、2回目を無視する
       if (rows_(sh).some(function (r) { return String(r.id) === id; })) return { ok: true, id: id };
       const photo = savePhoto_(d.photo, id, name);
-      sh.appendRow([id, name, String(price), String(weight), '1', '1', '1',
+      appendText_(sh, [id, name, String(price), String(weight), '1', '1', '1',
         String(Math.round(Number(f.fee)) || 0), clean_(f.pickupDate, 10), clean_(f.pickupTime, 30),
         clean_(f.deadline, 16), clean_(f.origin, 40), clean_(f.memo, 200), '受付中', now_(), photo]);
       SpreadsheetApp.flush();
